@@ -1,0 +1,252 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb" 
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  RECEPTIONIST
+  DOCTOR
+  LAB_STAFF
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  IN_PROGRESS
+}
+
+enum LabReportStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum BillingStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  role      Role
+  firstName String
+  lastName  String
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations based on role
+  doctor       Doctor?
+  receptionist Receptionist?
+  labStaff     LabStaff?
+
+  @@map("users")
+}
+
+model Doctor {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique
+  specialization String
+  qualification  String
+  experience     Int // years of experience
+  consultationFee Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+  prescriptions Prescription[]
+  assignedPatients Patient[] @relation("AssignedPatients")
+  treatments   Treatment[]
+
+  @@map("doctors")
+}
+
+model Receptionist {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  shift     String? // e.g., "Morning", "Evening", "Night"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+  patients     Patient[]
+
+  @@map("receptionists")
+}
+
+model LabStaff {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  department String? // e.g., "Pathology", "Radiology"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  labReports LabReport[]
+
+  @@map("lab_staff")
+}
+
+model Patient {
+  id            Int      @id @default(autoincrement())
+  firstName     String
+  lastName      String
+  email         String?  @unique
+  phone         String
+  dateOfBirth   DateTime
+  gender        Gender
+  address       String?
+  bloodGroup    String?
+  emergencyContact String?
+  registeredBy  Int // Receptionist who registered the patient
+  assignedDoctorId Int? // Assigned doctor for the patient
+  isDeleted     Boolean  @default(false) // Soft delete flag
+  deletedAt     DateTime? // Soft delete timestamp
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  receptionist  Receptionist  @relation(fields: [registeredBy], references: [id])
+  assignedDoctor Doctor?      @relation("AssignedPatients", fields: [assignedDoctorId], references: [id])
+  appointments  Appointment[]
+  prescriptions Prescription[]
+  labReports    LabReport[]
+  medicalRecords MedicalRecord[]
+  billings      Billing[]
+  treatments    Treatment[]
+
+  @@map("patients")
+}
+
+model Appointment {
+  id            Int               @id @default(autoincrement())
+  patientId     Int
+  doctorId      Int
+  receptionistId Int
+  appointmentDate DateTime
+  appointmentTime String
+  status        AppointmentStatus @default(SCHEDULED)
+  reason        String?
+  notes         String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor       Doctor        @relation(fields: [doctorId], references: [id])
+  receptionist Receptionist  @relation(fields: [receptionistId], references: [id])
+  prescription Prescription?
+
+  @@map("appointments")
+}
+
+model Prescription {
+  id            Int      @id @default(autoincrement())
+  appointmentId Int      @unique
+  patientId     Int
+  doctorId      Int
+  diagnosis     String
+  medicines     String   @db.Text // JSON string of medicines array
+  instructions  String?  @db.Text
+  followUpDate  DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient     Patient     @relation(fields: [patientId], references: [id])
+  doctor      Doctor      @relation(fields: [doctorId], references: [id])
+
+  @@map("prescriptions")
+}
+
+model LabReport {
+  id          Int             @id @default(autoincrement())
+  patientId   Int
+  testName    String
+  testType    String
+  status      LabReportStatus @default(PENDING)
+  results     String?         @db.Text // JSON string or text results
+  fileUrl     String?         // AWS S3 file URL
+  fileName    String?         // Original file name
+  remarks     String?         @db.Text
+  conductedBy Int?
+  reportDate  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  patient Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  labStaff LabStaff? @relation(fields: [conductedBy], references: [id])
+
+  @@map("lab_reports")
+}
+
+model MedicalRecord {
+  id          Int      @id @default(autoincrement())
+  patientId   Int
+  recordType  String // e.g., "Allergy", "Surgery", "Chronic Condition"
+  description String   @db.Text
+  recordDate  DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("medical_records")
+}
+
+model Billing {
+  id            Int           @id @default(autoincrement())
+  patientId     Int
+  invoiceNumber String        @unique
+  services      String        @db.Text // JSON string of services/tests
+  totalAmount   Float
+  paidAmount    Float         @default(0)
+  status        BillingStatus @default(PENDING)
+  paymentMethod String?
+  notes         String?       @db.Text
+  billingDate   DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("billings")
+}
+
+model Treatment {
+  id          Int      @id @default(autoincrement())
+  patientId   Int
+  doctorId    Int
+  diagnosis   String
+  treatment   String   @db.Text
+  medications String?  @db.Text // JSON string of medications
+  notes       String?  @db.Text
+  followUpDate DateTime?
+  treatmentDate DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor  @relation(fields: [doctorId], references: [id])
+
+  @@map("treatments")
+}
