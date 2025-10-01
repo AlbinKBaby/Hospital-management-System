@@ -63,7 +63,7 @@ const DoctorDashboard = () => {
         {/* Header */}
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Doctor Dashboard</h1>
-          <p className="text-gray-600 mt-1">Welcome back, Dr. {user?.name}</p>
+          <p className="text-gray-600 mt-1">Welcome back, Dr. {user?.firstName} {user?.lastName}</p>
         </div>
 
         {/* Stats Grid */}

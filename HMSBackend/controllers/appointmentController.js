@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const { Appointment, Patient, Doctor, Receptionist, Prescription } = require('../models');
 const { getPagination, formatPaginationResponse } = require('../utils/helpers');
-
-const prisma = new PrismaClient();
 
 // Create appointment (Receptionist)
 const createAppointment = async (req, res, next) => {
@@ -16,9 +14,7 @@ const createAppointment = async (req, res, next) => {
     } = req.body;
 
     // Get receptionist ID
-    const receptionist = await prisma.receptionist.findUnique({
-      where: { userId: req.user.id }
-    });
+    const receptionist = await Receptionist.findOne({ userId: req.user.id });
 
     if (!receptionist) {
       return res.status(403).json({
@@ -28,14 +24,9 @@ const createAppointment = async (req, res, next) => {
     }
 
     // Check if doctor exists and is active
-    const doctor = await prisma.doctor.findUnique({
-      where: { id: parseInt(doctorId) },
-      include: {
-        user: true
-      }
-    });
+    const doctor = await Doctor.findById(doctorId).populate('userId');
 
-    if (!doctor || !doctor.user.isActive) {
+    if (!doctor || !doctor.userId.isActive) {
       return res.status(400).json({
         success: false,
         message: 'Doctor not available'
@@ -43,9 +34,7 @@ const createAppointment = async (req, res, next) => {
     }
 
     // Check if patient exists
-    const patient = await prisma.patient.findUnique({
-      where: { id: parseInt(patientId) }
-    });
+    const patient = await Patient.findById(patientId);
 
     if (!patient) {
       return res.status(404).json({
@@ -54,42 +43,22 @@ const createAppointment = async (req, res, next) => {
       });
     }
 
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId: parseInt(patientId),
-        doctorId: parseInt(doctorId),
-        receptionistId: receptionist.id,
-        appointmentDate: new Date(appointmentDate),
-        appointmentTime,
-        reason,
-        notes,
-        status: 'SCHEDULED'
-      },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                email: true
-              }
-            }
-          }
-        },
-        receptionist: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            }
-          }
-        }
-      }
+    const appointment = await Appointment.create({
+      patientId,
+      doctorId,
+      receptionistId: receptionist._id,
+      appointmentDate: new Date(appointmentDate),
+      appointmentTime,
+      reason,
+      notes,
+      status: 'SCHEDULED'
     });
+
+    await appointment.populate([
+      { path: 'patientId' },
+      { path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName email' } },
+      { path: 'receptionistId', populate: { path: 'userId', select: 'firstName lastName' } }
+    ]);
 
     res.status(201).json({
       success: true,
@@ -114,11 +83,11 @@ const getAllAppointments = async (req, res, next) => {
     }
 
     if (doctorId) {
-      where.doctorId = parseInt(doctorId);
+      where.doctorId = doctorId;
     }
 
     if (patientId) {
-      where.patientId = parseInt(patientId);
+      where.patientId = patientId;
     }
 
     if (date) {
@@ -127,43 +96,20 @@ const getAllAppointments = async (req, res, next) => {
       endDate.setHours(23, 59, 59, 999);
 
       where.appointmentDate = {
-        gte: startDate,
-        lte: endDate
+        $gte: startDate,
+        $lte: endDate
       };
     }
 
     const [appointments, total] = await Promise.all([
-      prisma.appointment.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          patient: true,
-          doctor: {
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  email: true
-                }
-              }
-            }
-          },
-          receptionist: {
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true
-                }
-              }
-            }
-          }
-        },
-        orderBy: { appointmentDate: 'desc' }
-      }),
-      prisma.appointment.count({ where })
+      Appointment.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName email' } })
+        .populate({ path: 'receptionistId', populate: { path: 'userId', select: 'firstName lastName' } })
+        .sort({ appointmentDate: -1 }),
+      Appointment.countDocuments(where)
     ]);
 
     res.status(200).json({
@@ -180,35 +126,10 @@ const getAppointmentById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                email: true,
-                phone: true
-              }
-            }
-          }
-        },
-        receptionist: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            }
-          }
-        },
-        prescription: true
-      }
-    });
+    const appointment = await Appointment.findById(id)
+      .populate('patientId')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName email phone' } })
+      .populate({ path: 'receptionistId', populate: { path: 'userId', select: 'firstName lastName' } });
 
     if (!appointment) {
       return res.status(404).json({
@@ -217,9 +138,14 @@ const getAppointmentById = async (req, res, next) => {
       });
     }
 
+    // Get prescription if exists
+    const prescription = await Prescription.findOne({ appointmentId: id });
+    const appointmentData = appointment.toObject();
+    appointmentData.prescription = prescription;
+
     res.status(200).json({
       success: true,
-      data: appointment
+      data: appointmentData
     });
   } catch (error) {
     next(error);
@@ -238,29 +164,20 @@ const updateAppointment = async (req, res, next) => {
       notes
     } = req.body;
 
-    const appointment = await prisma.appointment.update({
-      where: { id: parseInt(id) },
-      data: {
-        appointmentDate: appointmentDate ? new Date(appointmentDate) : undefined,
-        appointmentTime,
-        status,
-        reason,
-        notes
-      },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const updateData = {};
+    if (appointmentDate) updateData.appointmentDate = new Date(appointmentDate);
+    if (appointmentTime) updateData.appointmentTime = appointmentTime;
+    if (status) updateData.status = status;
+    if (reason !== undefined) updateData.reason = reason;
+    if (notes !== undefined) updateData.notes = notes;
+
+    const appointment = await Appointment.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true }
+    )
+      .populate('patientId')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName' } });
 
     res.status(200).json({
       success: true,
@@ -277,23 +194,13 @@ const cancelAppointment = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const appointment = await prisma.appointment.update({
-      where: { id: parseInt(id) },
-      data: { status: 'CANCELLED' },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const appointment = await Appointment.findByIdAndUpdate(
+      id,
+      { status: 'CANCELLED' },
+      { new: true }
+    )
+      .populate('patientId')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName' } });
 
     res.status(200).json({
       success: true,
@@ -312,9 +219,7 @@ const getDoctorAppointments = async (req, res, next) => {
     const { skip, take } = getPagination(page, limit);
 
     // Get doctor profile
-    const doctor = await prisma.doctor.findUnique({
-      where: { userId: req.user.id }
-    });
+    const doctor = await Doctor.findOne({ userId: req.user.id });
 
     if (!doctor) {
       return res.status(403).json({
@@ -323,7 +228,7 @@ const getDoctorAppointments = async (req, res, next) => {
       });
     }
 
-    const where = { doctorId: doctor.id };
+    const where = { doctorId: doctor._id };
 
     if (status) {
       where.status = status;
@@ -335,28 +240,33 @@ const getDoctorAppointments = async (req, res, next) => {
       endDate.setHours(23, 59, 59, 999);
 
       where.appointmentDate = {
-        gte: startDate,
-        lte: endDate
+        $gte: startDate,
+        $lte: endDate
       };
     }
 
     const [appointments, total] = await Promise.all([
-      prisma.appointment.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          patient: true,
-          prescription: true
-        },
-        orderBy: { appointmentDate: 'desc' }
-      }),
-      prisma.appointment.count({ where })
+      Appointment.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .sort({ appointmentDate: -1 }),
+      Appointment.countDocuments(where)
     ]);
+
+    // Get prescriptions for appointments
+    const appointmentIds = appointments.map(a => a._id);
+    const prescriptions = await Prescription.find({ appointmentId: { $in: appointmentIds } });
+    
+    const appointmentsWithPrescriptions = appointments.map(apt => {
+      const aptObj = apt.toObject();
+      aptObj.prescription = prescriptions.find(p => p.appointmentId.toString() === apt._id.toString());
+      return aptObj;
+    });
 
     res.status(200).json({
       success: true,
-      ...formatPaginationResponse(appointments, total, parseInt(page), parseInt(limit))
+      ...formatPaginationResponse(appointmentsWithPrescriptions, total, parseInt(page), parseInt(limit))
     });
   } catch (error) {
     next(error);

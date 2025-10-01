@@ -1,8 +1,6 @@
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
+const { User } = require('../models');
 const config = require('../config/config');
-
-const prisma = new PrismaClient();
 
 // Verify JWT token
 const authenticate = async (req, res, next) => {
@@ -19,17 +17,9 @@ const authenticate = async (req, res, next) => {
     const decoded = jwt.verify(token, config.jwt.secret);
     
     // Fetch user from database
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        firstName: true,
-        lastName: true,
-        isActive: true
-      }
-    });
+    const user = await User.findById(decoded.userId).select(
+      'email role firstName lastName isActive'
+    );
 
     if (!user) {
       return res.status(401).json({ 
@@ -45,7 +35,14 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    req.user = user;
+    req.user = {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      isActive: user.isActive
+    };
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

@@ -1,8 +1,6 @@
-const { PrismaClient } = require('@prisma/client');
+const { LabReport, Patient, LabStaff } = require('../models');
 const { getPagination, formatPaginationResponse } = require('../utils/helpers');
 const { uploadToS3, deleteFromS3, getSignedUrl } = require('../utils/s3Upload');
-
-const prisma = new PrismaClient();
 
 // Create lab report (Receptionist or Doctor can request)
 const createLabReport = async (req, res, next) => {
@@ -10,9 +8,7 @@ const createLabReport = async (req, res, next) => {
     const { patientId, testName, testType, remarks } = req.body;
 
     // Verify patient exists
-    const patient = await prisma.patient.findUnique({
-      where: { id: parseInt(patientId) }
-    });
+    const patient = await Patient.findById(patientId);
 
     if (!patient) {
       return res.status(404).json({
@@ -21,18 +17,15 @@ const createLabReport = async (req, res, next) => {
       });
     }
 
-    const labReport = await prisma.labReport.create({
-      data: {
-        patientId: parseInt(patientId),
-        testName,
-        testType,
-        remarks,
-        status: 'PENDING'
-      },
-      include: {
-        patient: true
-      }
+    const labReport = await LabReport.create({
+      patientId,
+      testName,
+      testType,
+      remarks,
+      status: 'PENDING'
     });
+
+    await labReport.populate('patientId');
 
     res.status(201).json({
       success: true,
@@ -61,31 +54,17 @@ const getAllLabReports = async (req, res, next) => {
     }
 
     if (testType) {
-      where.testType = { contains: testType };
+      where.testType = { $regex: testType, $options: 'i' };
     }
 
     const [labReports, total] = await Promise.all([
-      prisma.labReport.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          patient: true,
-          labStaff: {
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  email: true
-                }
-              }
-            }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.labReport.count({ where })
+      LabReport.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .populate({ path: 'conductedBy', populate: { path: 'userId', select: 'firstName lastName email' } })
+        .sort({ createdAt: -1 }),
+      LabReport.countDocuments(where)
     ]);
 
     res.status(200).json({
@@ -102,24 +81,9 @@ const getLabReportById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const labReport = await prisma.labReport.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        patient: true,
-        labStaff: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                email: true,
-                phone: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const labReport = await LabReport.findById(id)
+      .populate('patientId')
+      .populate({ path: 'conductedBy', populate: { path: 'userId', select: 'firstName lastName email phone' } });
 
     if (!labReport) {
       return res.status(404).json({
@@ -179,26 +143,16 @@ const updateLabReport = async (req, res, next) => {
 
     // If status is being changed to IN_PROGRESS or COMPLETED, assign the lab staff
     if (status === 'IN_PROGRESS' || status === 'COMPLETED') {
-      updateData.conductedBy = labStaff.id;
+      updateData.conductedBy = labStaff._id;
     }
 
-    const labReport = await prisma.labReport.update({
-      where: { id: parseInt(id) },
-      data: updateData,
-      include: {
-        patient: true,
-        labStaff: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const labReport = await LabReport.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true }
+    )
+      .populate('patientId')
+      .populate({ path: 'conductedBy', populate: { path: 'userId', select: 'firstName lastName' } });
 
     res.status(200).json({
       success: true,
@@ -215,9 +169,7 @@ const deleteLabReport = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    await prisma.labReport.delete({
-      where: { id: parseInt(id) }
-    });
+    await LabReport.findByIdAndDelete(id);
 
     res.status(200).json({
       success: true,
@@ -235,9 +187,7 @@ const getLabStaffReports = async (req, res, next) => {
     const { skip, take } = getPagination(page, limit);
 
     // Get lab staff profile
-    const labStaff = await prisma.labStaff.findUnique({
-      where: { userId: req.user.id }
-    });
+    const labStaff = await LabStaff.findOne({ userId: req.user.id });
 
     if (!labStaff) {
       return res.status(403).json({
@@ -246,23 +196,19 @@ const getLabStaffReports = async (req, res, next) => {
       });
     }
 
-    const where = { conductedBy: labStaff.id };
+    const where = { conductedBy: labStaff._id };
 
     if (status) {
       where.status = status;
     }
 
     const [labReports, total] = await Promise.all([
-      prisma.labReport.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          patient: true
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.labReport.count({ where })
+      LabReport.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .sort({ createdAt: -1 }),
+      LabReport.countDocuments(where)
     ]);
 
     res.status(200).json({
@@ -281,16 +227,12 @@ const getPendingLabReports = async (req, res, next) => {
     const { skip, take } = getPagination(page, limit);
 
     const [labReports, total] = await Promise.all([
-      prisma.labReport.findMany({
-        where: { status: 'PENDING' },
-        skip,
-        take,
-        include: {
-          patient: true
-        },
-        orderBy: { createdAt: 'asc' }
-      }),
-      prisma.labReport.count({ where: { status: 'PENDING' } })
+      LabReport.find({ status: 'PENDING' })
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .sort({ createdAt: 1 }),
+      LabReport.countDocuments({ status: 'PENDING' })
     ]);
 
     res.status(200).json({
@@ -315,9 +257,7 @@ const uploadLabReportFile = async (req, res, next) => {
     }
 
     // Get lab staff profile
-    const labStaff = await prisma.labStaff.findUnique({
-      where: { userId: req.user.id }
-    });
+    const labStaff = await LabStaff.findOne({ userId: req.user.id });
 
     if (!labStaff) {
       return res.status(403).json({
@@ -327,9 +267,7 @@ const uploadLabReportFile = async (req, res, next) => {
     }
 
     // Verify lab report exists
-    const existingReport = await prisma.labReport.findUnique({
-      where: { id: parseInt(id) }
-    });
+    const existingReport = await LabReport.findById(id);
 
     if (!existingReport) {
       return res.status(404).json({
@@ -343,29 +281,19 @@ const uploadLabReportFile = async (req, res, next) => {
       const uploadResult = await uploadToS3(req.file, 'lab-reports');
 
       // Update lab report with file URL
-      const labReport = await prisma.labReport.update({
-        where: { id: parseInt(id) },
-        data: {
+      const labReport = await LabReport.findByIdAndUpdate(
+        id,
+        {
           fileUrl: uploadResult.fileUrl,
           fileName: uploadResult.fileName,
           status: 'COMPLETED',
-          conductedBy: labStaff.id,
+          conductedBy: labStaff._id,
           reportDate: new Date()
         },
-        include: {
-          patient: true,
-          labStaff: {
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true
-                }
-              }
-            }
-          }
-        }
-      });
+        { new: true }
+      )
+        .populate('patientId')
+        .populate({ path: 'conductedBy', populate: { path: 'userId', select: 'firstName lastName' } });
 
       res.status(200).json({
         success: true,
@@ -389,9 +317,7 @@ const downloadLabReportFile = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const labReport = await prisma.labReport.findUnique({
-      where: { id: parseInt(id) }
-    });
+    const labReport = await LabReport.findById(id);
 
     if (!labReport) {
       return res.status(404).json({

@@ -8,8 +8,14 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(user?.role)) {
-    return <Navigate to="/unauthorized" replace />;
+  if (allowedRoles && user?.role) {
+    // Case-insensitive role matching
+    const userRole = user.role.toLowerCase();
+    const hasAccess = allowedRoles.some(role => role.toLowerCase() === userRole);
+    
+    if (!hasAccess) {
+      return <Navigate to="/unauthorized" replace />;
+    }
   }
 
   return children;

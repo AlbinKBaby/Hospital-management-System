@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, Link } from 'react-router-dom';
 import { login, clearError } from '../redux/slices/authSlice';
-import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import { LogIn,  AlertCircle } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 const Login = () => {
   const dispatch = useDispatch();
@@ -14,24 +15,27 @@ const Login = () => {
     password: '',
   });
 
+  // Redirect if already authenticated (e.g., page refresh)
   useEffect(() => {
-    if (isAuthenticated && user) {
-      // Redirect based on role
-      switch (user.role) {
-        case 'doctor':
-          navigate('/doctor/dashboard');
+    if (isAuthenticated && user && user.role) {
+      console.log('🔄 Already authenticated, redirecting...');
+      const roleUpper = user.role.toUpperCase();
+      
+      switch (roleUpper) {
+        case 'DOCTOR':
+          navigate('/doctor/dashboard', { replace: true });
           break;
-        case 'receptionist':
-          navigate('/receptionist/dashboard');
+        case 'RECEPTIONIST':
+          navigate('/receptionist/dashboard', { replace: true });
           break;
-        case 'lab_staff':
-          navigate('/lab/dashboard');
+        case 'LAB_STAFF':
+          navigate('/lab/dashboard', { replace: true });
           break;
-        case 'admin':
-          navigate('/admin/dashboard');
+        case 'ADMIN':
+          navigate('/admin/dashboard', { replace: true });
           break;
         default:
-          navigate('/');
+          navigate('/', { replace: true });
       }
     }
   }, [isAuthenticated, user, navigate]);
@@ -51,7 +55,68 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    dispatch(login(formData));
+    
+    console.log('📤 Sending login data to backend:', formData);
+    
+    const result = await dispatch(login(formData));
+    
+    console.log('📥 Backend response:', result);
+    
+    if (login.rejected.match(result)) {
+      console.error('❌ Login failed:', result.payload);
+      toast.error(result.payload || 'Login failed. Please check your credentials.', {
+        position: "top-right",
+        autoClose: 4000,
+      });
+    } else if (login.fulfilled.match(result)) {
+      console.log('✅ Login successful:', result.payload);
+      console.log('🔍 Full payload structure:', JSON.stringify(result.payload, null, 2));
+      
+      // Get user role from backend response
+      const user = result.payload?.user;
+      const userRole = user?.role;
+      
+      console.log('👤 User object:', user);
+      console.log('👤 User role from backend:', userRole);
+      
+      if (!userRole) {
+        console.error('❌ No role found in response!');
+        toast.error('Login successful but role not found. Please contact admin.', {
+          position: "top-right",
+          autoClose: 4000,
+        });
+        return;
+      }
+      
+      // Show success toast
+      toast.success(`Welcome back, ${user.firstName || 'User'}! 🎉`, {
+        position: "top-right",
+        autoClose: 1500,
+      });
+      
+      // Navigate based on role
+      switch (userRole.toUpperCase()) {
+        case 'DOCTOR':
+          console.log('➡️ Navigating to /doctor/dashboard');
+          navigate('/doctor/dashboard');
+          break;
+        case 'RECEPTIONIST':
+          console.log('➡️ Navigating to /receptionist/dashboard');
+          navigate('/receptionist/dashboard');
+          break;
+        case 'LAB_STAFF':
+          console.log('➡️ Navigating to /lab/dashboard');
+          navigate('/lab/dashboard');
+          break;
+        case 'ADMIN':
+          console.log('➡️ Navigating to /admin/dashboard');
+          navigate('/admin/dashboard');
+          break;
+        default:
+          console.log('⚠️ Unknown role, navigating to home');
+          navigate('/');
+      }
+    }
   };
 
   return (
@@ -84,44 +149,34 @@ const Login = () => {
               <label htmlFor="email" className="label">
                 Email Address
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  className="input-field pl-10"
-                  placeholder="Enter your email"
-                  value={formData.email}
-                  onChange={handleChange}
-                />
-              </div>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                className="input-field"
+                placeholder="Enter your email"
+                value={formData.email}
+                onChange={handleChange}
+              />
             </div>
 
             <div>
               <label htmlFor="password" className="label">
                 Password
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  className="input-field pl-10"
-                  placeholder="Enter your password"
-                  value={formData.password}
-                  onChange={handleChange}
-                />
-              </div>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                className="input-field"
+                placeholder="Enter your password"
+                value={formData.password}
+                onChange={handleChange}
+              />
             </div>
 
             <div className="flex items-center justify-between">

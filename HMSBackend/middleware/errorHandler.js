@@ -2,7 +2,38 @@
 const errorHandler = (err, req, res, next) => {
   console.error('Error:', err);
 
-  // Prisma errors
+  // Mongoose duplicate key error (11000)
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyPattern || {})[0];
+    return res.status(400).json({
+      success: false,
+      message: `A record with this ${field || 'information'} already exists.`,
+      error: `Duplicate ${field || 'entry'}`
+    });
+  }
+
+  // Mongoose validation error
+  if (err.name === 'ValidationError') {
+    const errors = Object.values(err.errors).map(e => ({
+      field: e.path,
+      message: e.message
+    }));
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed.',
+      errors
+    });
+  }
+
+  // Mongoose CastError (invalid ObjectId)
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid ${err.path}: ${err.value}`
+    });
+  }
+
+  // Prisma errors (for future compatibility)
   if (err.code === 'P2002') {
     return res.status(400).json({
       success: false,
@@ -24,15 +55,6 @@ const errorHandler = (err, req, res, next) => {
       success: false,
       message: 'Database operation failed.',
       error: err.message
-    });
-  }
-
-  // Validation errors
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Validation failed.',
-      errors: err.errors
     });
   }
 

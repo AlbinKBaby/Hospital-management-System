@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const { User, Doctor, Patient, Appointment, LabReport, Billing, Treatment, Receptionist, LabStaff } = require('../models');
 const { formatUserResponse, getPagination, formatPaginationResponse } = require('../utils/helpers');
-
-const prisma = new PrismaClient();
 
 // Get all users with pagination and filters
 const getAllUsers = async (req, res, next) => {
@@ -20,26 +18,22 @@ const getAllUsers = async (req, res, next) => {
     }
 
     if (search) {
-      where.OR = [
-        { firstName: { contains: search } },
-        { lastName: { contains: search } },
-        { email: { contains: search } }
+      where.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
       ];
     }
 
     const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          doctor: true,
-          receptionist: true,
-          labStaff: true
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.user.count({ where })
+      User.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('doctor')
+        .populate('receptionist')
+        .populate('labStaff')
+        .sort({ createdAt: -1 }),
+      User.countDocuments(where)
     ]);
 
     const formattedUsers = users.map(formatUserResponse);
@@ -58,14 +52,10 @@ const getUserById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const user = await prisma.user.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const user = await User.findById(id)
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     if (!user) {
       return res.status(404).json({
@@ -89,20 +79,14 @@ const updateUser = async (req, res, next) => {
     const { id } = req.params;
     const { firstName, lastName, phone, isActive } = req.body;
 
-    const user = await prisma.user.update({
-      where: { id: parseInt(id) },
-      data: {
-        firstName,
-        lastName,
-        phone,
-        isActive
-      },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const user = await User.findByIdAndUpdate(
+      id,
+      { firstName, lastName, phone, isActive },
+      { new: true }
+    )
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     res.status(200).json({
       success: true,
@@ -119,9 +103,7 @@ const deleteUser = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    await prisma.user.delete({
-      where: { id: parseInt(id) }
-    });
+    await User.findByIdAndDelete(id);
 
     res.status(200).json({
       success: true,
@@ -137,9 +119,7 @@ const toggleUserStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const user = await prisma.user.findUnique({
-      where: { id: parseInt(id) }
-    });
+    const user = await User.findById(id);
 
     if (!user) {
       return res.status(404).json({
@@ -148,15 +128,14 @@ const toggleUserStatus = async (req, res, next) => {
       });
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: parseInt(id) },
-      data: { isActive: !user.isActive },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { isActive: !user.isActive },
+      { new: true }
+    )
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     res.status(200).json({
       success: true,
@@ -171,6 +150,11 @@ const toggleUserStatus = async (req, res, next) => {
 // Get dashboard statistics
 const getDashboardStats = async (req, res, next) => {
   try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
     const [
       totalPatients,
       totalDoctors,
@@ -179,23 +163,17 @@ const getDashboardStats = async (req, res, next) => {
       pendingLabReports,
       completedAppointments
     ] = await Promise.all([
-      prisma.patient.count(),
-      prisma.doctor.count(),
-      prisma.appointment.count(),
-      prisma.appointment.count({
-        where: {
-          appointmentDate: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            lt: new Date(new Date().setHours(23, 59, 59, 999))
-          }
+      Patient.countDocuments(),
+      Doctor.countDocuments(),
+      Appointment.countDocuments(),
+      Appointment.countDocuments({
+        appointmentDate: {
+          $gte: today,
+          $lt: tomorrow
         }
       }),
-      prisma.labReport.count({
-        where: { status: 'PENDING' }
-      }),
-      prisma.appointment.count({
-        where: { status: 'COMPLETED' }
-      })
+      LabReport.countDocuments({ status: 'PENDING' }),
+      Appointment.countDocuments({ status: 'COMPLETED' })
     ]);
 
     res.status(200).json({
@@ -222,29 +200,16 @@ const getAllDoctors = async (req, res, next) => {
 
     const where = {};
     if (specialization) {
-      where.specialization = { contains: specialization };
+      where.specialization = { $regex: specialization, $options: 'i' };
     }
 
     const [doctors, total] = await Promise.all([
-      prisma.doctor.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-              phone: true,
-              isActive: true
-            }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.doctor.count({ where })
+      Doctor.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate({ path: 'userId', select: 'email firstName lastName phone isActive' })
+        .sort({ createdAt: -1 }),
+      Doctor.countDocuments(where)
     ]);
 
     res.status(200).json({
@@ -264,9 +229,12 @@ const getHospitalSummary = async (req, res, next) => {
     // Date range setup
     const dateFilter = {};
     if (startDate && endDate) {
-      dateFilter.gte = new Date(startDate);
-      dateFilter.lte = new Date(endDate);
+      dateFilter.$gte = new Date(startDate);
+      dateFilter.$lte = new Date(endDate);
     }
+
+    // Build date query
+    const dateQuery = dateFilter.$gte ? { createdAt: dateFilter } : {};
 
     // Get comprehensive statistics
     const [
@@ -303,95 +271,66 @@ const getHospitalSummary = async (req, res, next) => {
       usersByRole
     ] = await Promise.all([
       // Patients
-      prisma.patient.count({ where: { isDeleted: false } }),
-      prisma.patient.count({
-        where: {
-          isDeleted: false,
-          createdAt: dateFilter.gte ? { gte: dateFilter.gte, lte: dateFilter.lte } : undefined
-        }
-      }),
-      prisma.patient.groupBy({
-        by: ['gender'],
-        where: { isDeleted: false },
-        _count: true
-      }),
+      Patient.countDocuments({ isDeleted: false }),
+      Patient.countDocuments({ isDeleted: false, ...dateQuery }),
+      Patient.aggregate([
+        { $match: { isDeleted: false } },
+        { $group: { _id: '$gender', count: { $sum: 1 } } }
+      ]),
       
       // Doctors
-      prisma.doctor.count(),
-      prisma.doctor.groupBy({
-        by: ['specialization'],
-        _count: true
-      }),
+      Doctor.countDocuments(),
+      Doctor.aggregate([
+        { $group: { _id: '$specialization', count: { $sum: 1 } } }
+      ]),
       
       // Appointments
-      prisma.appointment.count({
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-      }),
-      prisma.appointment.groupBy({
-        by: ['status'],
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined,
-        _count: true
-      }),
-      prisma.appointment.count({
-        where: {
-          status: 'COMPLETED',
-          ...(dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : {})
-        }
-      }),
+      Appointment.countDocuments(dateQuery),
+      Appointment.aggregate([
+        ...(dateFilter.$gte ? [{ $match: dateQuery }] : []),
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      Appointment.countDocuments({ status: 'COMPLETED', ...dateQuery }),
       
       // Lab Reports
-      prisma.labReport.count({
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-      }),
-      prisma.labReport.groupBy({
-        by: ['status'],
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined,
-        _count: true
-      }),
-      prisma.labReport.count({
-        where: {
-          status: 'COMPLETED',
-          ...(dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : {})
-        }
-      }),
+      LabReport.countDocuments(dateQuery),
+      LabReport.aggregate([
+        ...(dateFilter.$gte ? [{ $match: dateQuery }] : []),
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      LabReport.countDocuments({ status: 'COMPLETED', ...dateQuery }),
       
       // Revenue
-      prisma.billing.aggregate({
-        _sum: { totalAmount: true },
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-      }),
-      prisma.billing.aggregate({
-        _sum: { paidAmount: true },
-        where: {
-          status: 'PAID',
-          ...(dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : {})
-        }
-      }),
-      prisma.billing.aggregate({
-        _sum: { totalAmount: true },
-        where: {
-          status: 'PENDING',
-          ...(dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : {})
-        }
-      }),
-      prisma.billing.groupBy({
-        by: ['status'],
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined,
-        _count: true,
-        _sum: { totalAmount: true, paidAmount: true }
-      }),
+      Billing.aggregate([
+        ...(dateFilter.$gte ? [{ $match: dateQuery }] : []),
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+      ]),
+      Billing.aggregate([
+        { $match: { status: 'PAID', ...dateQuery } },
+        { $group: { _id: null, total: { $sum: '$paidAmount' } } }
+      ]),
+      Billing.aggregate([
+        { $match: { status: 'PENDING', ...dateQuery } },
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+      ]),
+      Billing.aggregate([
+        ...(dateFilter.$gte ? [{ $match: dateQuery }] : []),
+        { $group: { 
+          _id: '$status', 
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$totalAmount' },
+          paidAmount: { $sum: '$paidAmount' }
+        }}
+      ]),
       
       // Treatments
-      prisma.treatment.count({
-        where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-      }),
+      Treatment.countDocuments(dateQuery),
       
       // Users
-      prisma.user.count({ where: { isActive: true } }),
-      prisma.user.groupBy({
-        by: ['role'],
-        _count: true
-      })
+      User.countDocuments({ isActive: true }),
+      User.aggregate([
+        { $group: { _id: '$role', count: { $sum: 1 } } }
+      ])
     ]);
 
     res.status(200).json({
@@ -405,42 +344,42 @@ const getHospitalSummary = async (req, res, next) => {
           total: totalPatients,
           newPatients: newPatientsCount,
           byGender: patientsByGender.map(g => ({
-            gender: g.gender,
-            count: g._count
+            gender: g._id,
+            count: g.count
           }))
         },
         doctors: {
           total: totalDoctors,
           bySpecialization: doctorsBySpecialization.map(d => ({
-            specialization: d.specialization,
-            count: d._count
+            specialization: d._id,
+            count: d.count
           }))
         },
         appointments: {
           total: totalAppointments,
           completed: completedAppointments,
           byStatus: appointmentsByStatus.map(a => ({
-            status: a.status,
-            count: a._count
+            status: a._id,
+            count: a.count
           }))
         },
         labReports: {
           total: totalLabReports,
           completed: completedLabReports,
           byStatus: labReportsByStatus.map(l => ({
-            status: l.status,
-            count: l._count
+            status: l._id,
+            count: l.count
           }))
         },
         revenue: {
-          total: totalRevenue._sum.totalAmount || 0,
-          paid: paidRevenue._sum.paidAmount || 0,
-          pending: pendingRevenue._sum.totalAmount || 0,
+          total: totalRevenue[0]?.total || 0,
+          paid: paidRevenue[0]?.total || 0,
+          pending: pendingRevenue[0]?.total || 0,
           byStatus: billingByStatus.map(b => ({
-            status: b.status,
-            count: b._count,
-            totalAmount: b._sum.totalAmount || 0,
-            paidAmount: b._sum.paidAmount || 0
+            status: b._id,
+            count: b.count,
+            totalAmount: b.totalAmount || 0,
+            paidAmount: b.paidAmount || 0
           }))
         },
         treatments: {
@@ -449,8 +388,8 @@ const getHospitalSummary = async (req, res, next) => {
         users: {
           active: activeUsers,
           byRole: usersByRole.map(u => ({
-            role: u.role,
-            count: u._count
+            role: u._id,
+            count: u.count
           }))
         }
       }
@@ -487,29 +426,13 @@ const generatePDFReport = async (req, res, next) => {
 
       case 'patients':
         // Get detailed patient report
-        const patients = await prisma.patient.findMany({
-          where: {
-            isDeleted: false,
-            ...(dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : {})
-          },
-          include: {
-            receptionist: {
-              include: {
-                user: {
-                  select: { firstName: true, lastName: true }
-                }
-              }
-            },
-            assignedDoctor: {
-              include: {
-                user: {
-                  select: { firstName: true, lastName: true }
-                }
-              }
-            }
-          },
-          orderBy: { createdAt: 'desc' }
-        });
+        const patients = await Patient.find({
+          isDeleted: false,
+          ...dateQuery
+        })
+          .populate({ path: 'registeredBy', populate: { path: 'userId', select: 'firstName lastName' } })
+          .populate({ path: 'assignedDoctorId', populate: { path: 'userId', select: 'firstName lastName' } })
+          .sort({ createdAt: -1 });
         reportData = {
           title: 'Patients Report',
           type: 'patients',
@@ -519,33 +442,32 @@ const generatePDFReport = async (req, res, next) => {
 
       case 'revenue':
         // Get revenue report
-        const billings = await prisma.billing.findMany({
-          where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined,
-          include: {
-            patient: {
-              select: { firstName: true, lastName: true, phone: true }
-            }
-          },
-          orderBy: { createdAt: 'desc' }
-        });
+        const billings = await Billing.find(dateQuery)
+          .populate({ path: 'patientId', select: 'firstName lastName phone' })
+          .sort({ createdAt: -1 });
         
-        const revenueStats = await prisma.billing.aggregate({
-          _sum: { totalAmount: true, paidAmount: true },
-          _count: true,
-          where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-        });
+        const revenueStats = await Billing.aggregate([
+          ...(dateFilter.$gte ? [{ $match: dateQuery }] : []),
+          { $group: {
+            _id: null,
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$totalAmount' },
+            paidAmount: { $sum: '$paidAmount' }
+          }}
+        ]);
 
+        const stats = revenueStats[0] || { count: 0, totalAmount: 0, paidAmount: 0 };
         reportData = {
           title: 'Revenue Report',
           type: 'revenue',
           statistics: {
-            totalBillings: revenueStats._count,
-            totalRevenue: revenueStats._sum.totalAmount || 0,
-            totalPaid: revenueStats._sum.paidAmount || 0,
-            totalPending: (revenueStats._sum.totalAmount || 0) - (revenueStats._sum.paidAmount || 0)
+            totalBillings: stats.count,
+            totalRevenue: stats.totalAmount,
+            totalPaid: stats.paidAmount,
+            totalPending: stats.totalAmount - stats.paidAmount
           },
           data: billings.map(b => ({
-            ...b,
+            ...b.toObject(),
             services: JSON.parse(b.services)
           }))
         };
@@ -553,22 +475,10 @@ const generatePDFReport = async (req, res, next) => {
 
       case 'appointments':
         // Get appointments report
-        const appointments = await prisma.appointment.findMany({
-          where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined,
-          include: {
-            patient: {
-              select: { firstName: true, lastName: true, phone: true }
-            },
-            doctor: {
-              include: {
-                user: {
-                  select: { firstName: true, lastName: true }
-                }
-              }
-            }
-          },
-          orderBy: { appointmentDate: 'desc' }
-        });
+        const appointments = await Appointment.find(dateQuery)
+          .populate({ path: 'patientId', select: 'firstName lastName phone' })
+          .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName' } })
+          .sort({ appointmentDate: -1 });
         reportData = {
           title: 'Appointments Report',
           type: 'appointments',
@@ -578,22 +488,10 @@ const generatePDFReport = async (req, res, next) => {
 
       case 'lab-reports':
         // Get lab reports
-        const labReports = await prisma.labReport.findMany({
-          where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined,
-          include: {
-            patient: {
-              select: { firstName: true, lastName: true, phone: true }
-            },
-            labStaff: {
-              include: {
-                user: {
-                  select: { firstName: true, lastName: true }
-                }
-              }
-            }
-          },
-          orderBy: { createdAt: 'desc' }
-        });
+        const labReports = await LabReport.find(dateQuery)
+          .populate({ path: 'patientId', select: 'firstName lastName phone' })
+          .populate({ path: 'conductedBy', populate: { path: 'userId', select: 'firstName lastName' } })
+          .sort({ createdAt: -1 });
         reportData = {
           title: 'Lab Reports Summary',
           type: 'lab-reports',
@@ -631,6 +529,8 @@ const generatePDFReport = async (req, res, next) => {
 
 // Helper function for summary data
 async function getHospitalSummaryData(dateFilter) {
+  const dateQuery = dateFilter.$gte ? { createdAt: dateFilter } : {};
+
   const [
     totalPatients,
     totalDoctors,
@@ -639,35 +539,31 @@ async function getHospitalSummaryData(dateFilter) {
     totalRevenue,
     paidRevenue
   ] = await Promise.all([
-    prisma.patient.count({ where: { isDeleted: false } }),
-    prisma.doctor.count(),
-    prisma.appointment.count({
-      where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-    }),
-    prisma.labReport.count({
-      where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-    }),
-    prisma.billing.aggregate({
-      _sum: { totalAmount: true },
-      where: dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : undefined
-    }),
-    prisma.billing.aggregate({
-      _sum: { paidAmount: true },
-      where: {
-        status: 'PAID',
-        ...(dateFilter.gte ? { createdAt: { gte: dateFilter.gte, lte: dateFilter.lte } } : {})
-      }
-    })
+    Patient.countDocuments({ isDeleted: false }),
+    Doctor.countDocuments(),
+    Appointment.countDocuments(dateQuery),
+    LabReport.countDocuments(dateQuery),
+    Billing.aggregate([
+      ...(dateFilter.$gte ? [{ $match: dateQuery }] : []),
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    ]),
+    Billing.aggregate([
+      { $match: { status: 'PAID', ...dateQuery } },
+      { $group: { _id: null, total: { $sum: '$paidAmount' } } }
+    ])
   ]);
+
+  const totalRev = totalRevenue[0]?.total || 0;
+  const paidRev = paidRevenue[0]?.total || 0;
 
   return {
     totalPatients,
     totalDoctors,
     totalAppointments,
     totalLabReports,
-    totalRevenue: totalRevenue._sum.totalAmount || 0,
-    paidRevenue: paidRevenue._sum.paidAmount || 0,
-    pendingRevenue: (totalRevenue._sum.totalAmount || 0) - (paidRevenue._sum.paidAmount || 0)
+    totalRevenue: totalRev,
+    paidRevenue: paidRev,
+    pendingRevenue: totalRev - paidRev
   };
 }
 

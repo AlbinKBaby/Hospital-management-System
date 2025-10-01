@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const { Billing, Patient } = require('../models');
 const { getPagination, formatPaginationResponse } = require('../utils/helpers');
-
-const prisma = new PrismaClient();
 
 // Generate unique invoice number
 const generateInvoiceNumber = () => {
@@ -23,9 +21,7 @@ const createBilling = async (req, res, next) => {
     } = req.body;
 
     // Verify patient exists
-    const patient = await prisma.patient.findUnique({
-      where: { id: parseInt(patientId) }
-    });
+    const patient = await Patient.findById(patientId);
 
     if (!patient) {
       return res.status(404).json({
@@ -43,21 +39,18 @@ const createBilling = async (req, res, next) => {
       status = 'PAID';
     }
 
-    const billing = await prisma.billing.create({
-      data: {
-        patientId: parseInt(patientId),
-        invoiceNumber,
-        services: JSON.stringify(services),
-        totalAmount: parseFloat(totalAmount),
-        paidAmount: parseFloat(paidAmount) || 0,
-        status,
-        paymentMethod,
-        notes
-      },
-      include: {
-        patient: true
-      }
+    const billing = await Billing.create({
+      patientId,
+      invoiceNumber,
+      services: JSON.stringify(services),
+      totalAmount: parseFloat(totalAmount),
+      paidAmount: parseFloat(paidAmount) || 0,
+      status,
+      paymentMethod,
+      notes
     });
+
+    await billing.populate('patientId');
 
     // Parse services back to JSON
     const billingData = {
@@ -94,24 +87,20 @@ const getAllBillings = async (req, res, next) => {
     if (startDate || endDate) {
       where.billingDate = {};
       if (startDate) {
-        where.billingDate.gte = new Date(startDate);
+        where.billingDate.$gte = new Date(startDate);
       }
       if (endDate) {
-        where.billingDate.lte = new Date(endDate);
+        where.billingDate.$lte = new Date(endDate);
       }
     }
 
     const [billings, total] = await Promise.all([
-      prisma.billing.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          patient: true
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.billing.count({ where })
+      Billing.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .sort({ createdAt: -1 }),
+      Billing.countDocuments(where)
     ]);
 
     // Parse services JSON
@@ -134,12 +123,7 @@ const getBillingById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const billing = await prisma.billing.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        patient: true
-      }
-    });
+    const billing = await Billing.findById(id).populate('patientId');
 
     if (!billing) {
       return res.status(404).json({
@@ -185,13 +169,11 @@ const updateBilling = async (req, res, next) => {
     if (paymentMethod) updateData.paymentMethod = paymentMethod;
     if (notes) updateData.notes = notes;
 
-    const billing = await prisma.billing.update({
-      where: { id: parseInt(id) },
-      data: updateData,
-      include: {
-        patient: true
-      }
-    });
+    const billing = await Billing.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true }
+    ).populate('patientId');
 
     // Parse services back to JSON
     const billingData = {
@@ -214,9 +196,7 @@ const deleteBilling = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    await prisma.billing.delete({
-      where: { id: parseInt(id) }
-    });
+    await Billing.findByIdAndDelete(id);
 
     res.status(200).json({
       success: true,
@@ -232,12 +212,7 @@ const generatePDF = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const billing = await prisma.billing.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        patient: true
-      }
-    });
+    const billing = await Billing.findById(id).populate('patientId');
 
     if (!billing) {
       return res.status(404).json({
@@ -258,10 +233,10 @@ const generatePDF = async (req, res, next) => {
         invoiceNumber: billing.invoiceNumber,
         billingDate: billing.billingDate,
         patient: {
-          name: `${billing.patient.firstName} ${billing.patient.lastName}`,
-          email: billing.patient.email,
-          phone: billing.patient.phone,
-          address: billing.patient.address
+          name: `${billing.patientId.firstName} ${billing.patientId.lastName}`,
+          email: billing.patientId.email,
+          phone: billing.patientId.phone,
+          address: billing.patientId.address
         },
         services,
         totalAmount: billing.totalAmount,

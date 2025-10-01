@@ -27,11 +27,12 @@ const Layout = ({ children }) => {
   };
 
   const getNavigationItems = () => {
+    const userRole = user?.role?.toLowerCase();
     const baseItems = [
-      { name: 'Dashboard', icon: Home, path: `/${user?.role}/dashboard` },
+      { name: 'Dashboard', icon: Home, path: `/${userRole}/dashboard` },
     ];
 
-    switch (user?.role) {
+    switch (userRole) {
       case 'doctor':
         return [
           ...baseItems,
@@ -101,8 +102,8 @@ const Layout = ({ children }) => {
                 </div>
               </div>
               <div className="ml-3">
-                <p className="text-sm font-medium text-gray-900">{user?.name}</p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role?.replace('_', ' ')}</p>
+                <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                <p className="text-xs text-gray-500 capitalize">{user?.role?.toLowerCase().replace('_', ' ')}</p>
               </div>
             </div>
           </div>
@@ -148,7 +149,7 @@ const Layout = ({ children }) => {
 
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">
-                Welcome, <span className="font-medium">{user?.name}</span>
+                Welcome, <span className="font-medium">{user?.firstName} {user?.lastName}</span>
               </span>
             </div>
           </div>

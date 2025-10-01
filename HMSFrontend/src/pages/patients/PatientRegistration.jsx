@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { createPatient } from '../../redux/slices/patientSlice';
 import { UserPlus, User, Mail, Phone, Calendar, MapPin, AlertCircle } from 'lucide-react';
+import { toast } from 'react-toastify';
 import Layout from '../../components/Layout';
 
 const PatientRegistration = () => {
@@ -91,13 +92,28 @@ const PatientRegistration = () => {
     e.preventDefault();
 
     if (!validateForm()) {
+      toast.error('Please fill in all required fields correctly! 📋', {
+        position: "top-right",
+        autoClose: 3000,
+      });
       return;
     }
 
     const result = await dispatch(createPatient(formData));
+    
     if (createPatient.fulfilled.match(result)) {
-      alert('Patient registered successfully!');
-      navigate('/receptionist/patients');
+      toast.success('Patient registered successfully! 🎉', {
+        position: "top-right",
+        autoClose: 2500,
+      });
+      setTimeout(() => {
+        navigate('/receptionist/patients');
+      }, 1000);
+    } else if (createPatient.rejected.match(result)) {
+      toast.error(result.payload || 'Failed to register patient. Please try again.', {
+        position: "top-right",
+        autoClose: 4000,
+      });
     }
   };
 
@@ -119,6 +135,10 @@ const PatientRegistration = () => {
       allergies: '',
     });
     setErrors({});
+    toast.info('Form has been reset! 🔄', {
+      position: "top-right",
+      autoClose: 2000,
+    });
   };
 
   return (

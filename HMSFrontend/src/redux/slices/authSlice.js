@@ -6,11 +6,15 @@ export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue }) => {
     try {
+      console.log('🔄 API Call: POST /auth/login with data:', credentials);
       const response = await api.post('/auth/login', credentials);
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      return response.data;
+      console.log('✅ API Response:', response.data);
+      localStorage.setItem('token', response.data.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.data.user));
+      return response.data.data;
     } catch (error) {
+      console.error('❌ API Error:', error.response?.data || error.message);
+      console.error('Status Code:', error.response?.status);
       return rejectWithValue(error.response?.data?.message || 'Login failed');
     }
   }
@@ -20,9 +24,21 @@ export const register = createAsyncThunk(
   'auth/register',
   async (userData, { rejectWithValue }) => {
     try {
+      console.log('🔄 API Call: POST /auth/register with data:', userData);
       const response = await api.post('/auth/register', userData);
-      return response.data;
+      console.log('✅ API Response:', response.data);
+      // Backend returns { success, message, data: { user, token } }
+      return response.data.data;
     } catch (error) {
+      console.error('❌ API Error:', error.response?.data || error.message);
+      console.error('Status Code:', error.response?.status);
+      
+      // If validation errors exist, format them
+      if (error.response?.data?.errors) {
+        const errorMessages = error.response.data.errors.map(err => err.message).join(', ');
+        return rejectWithValue(errorMessages);
+      }
+      
       return rejectWithValue(error.response?.data?.message || 'Registration failed');
     }
   }
@@ -63,11 +79,18 @@ const authSlice = createSlice({
         state.error = null;
       })
       .addCase(login.fulfilled, (state, action) => {
+        console.log('🔧 Redux: login.fulfilled reducer called');
+        console.log('🔧 Payload:', action.payload);
         state.loading = false;
         state.isAuthenticated = true;
         state.user = action.payload.user;
         state.token = action.payload.token;
         state.error = null;
+        console.log('🔧 Redux state updated:', { 
+          isAuthenticated: state.isAuthenticated, 
+          user: state.user,
+          hasRole: !!state.user?.role 
+        });
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;

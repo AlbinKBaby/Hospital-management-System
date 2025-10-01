@@ -12,9 +12,10 @@ const {
 
 // Public routes
 router.post('/login', loginValidation, validate, authController.login);
+router.post('/register', registerValidation, validate, authController.register);
 
-// Protected routes - Admin only can register new users
-router.post('/register', authenticate, authorize('ADMIN'), registerValidation, validate, authController.register);
+// Protected routes - Admin only can register new users (alternative admin route)
+router.post('/admin/register', authenticate, authorize('ADMIN'), registerValidation, validate, authController.register);
 
 // Protected routes - All authenticated users
 router.post('/logout', authenticate, authController.logout);

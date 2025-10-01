@@ -43,7 +43,7 @@ enum BillingStatus {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   email     String   @unique
   password  String
   role      Role
@@ -63,8 +63,8 @@ model User {
 }
 
 model Doctor {
-  id             Int      @id @default(autoincrement())
-  userId         Int      @unique
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @unique @db.ObjectId
   specialization String
   qualification  String
   experience     Int // years of experience
@@ -82,8 +82,8 @@ model Doctor {
 }
 
 model Receptionist {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @unique @db.ObjectId
   shift     String? // e.g., "Morning", "Evening", "Night"
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -96,8 +96,8 @@ model Receptionist {
 }
 
 model LabStaff {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @unique @db.ObjectId
   department String? // e.g., "Pathology", "Radiology"
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -109,7 +109,7 @@ model LabStaff {
 }
 
 model Patient {
-  id            Int      @id @default(autoincrement())
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
   firstName     String
   lastName      String
   email         String?  @unique
@@ -119,8 +119,8 @@ model Patient {
   address       String?
   bloodGroup    String?
   emergencyContact String?
-  registeredBy  Int // Receptionist who registered the patient
-  assignedDoctorId Int? // Assigned doctor for the patient
+  registeredBy  String   @db.ObjectId // Receptionist who registered the patient
+  assignedDoctorId String? @db.ObjectId // Assigned doctor for the patient
   isDeleted     Boolean  @default(false) // Soft delete flag
   deletedAt     DateTime? // Soft delete timestamp
   createdAt     DateTime @default(now())
@@ -139,10 +139,10 @@ model Patient {
 }
 
 model Appointment {
-  id            Int               @id @default(autoincrement())
-  patientId     Int
-  doctorId      Int
-  receptionistId Int
+  id            String            @id @default(auto()) @map("_id") @db.ObjectId
+  patientId     String            @db.ObjectId
+  doctorId      String            @db.ObjectId
+  receptionistId String           @db.ObjectId
   appointmentDate DateTime
   appointmentTime String
   status        AppointmentStatus @default(SCHEDULED)
@@ -160,13 +160,13 @@ model Appointment {
 }
 
 model Prescription {
-  id            Int      @id @default(autoincrement())
-  appointmentId Int      @unique
-  patientId     Int
-  doctorId      Int
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  appointmentId String   @unique @db.ObjectId
+  patientId     String   @db.ObjectId
+  doctorId      String   @db.ObjectId
   diagnosis     String
-  medicines     String   @db.Text // JSON string of medicines array
-  instructions  String?  @db.Text
+  medicines     String // JSON string of medicines array
+  instructions  String?
   followUpDate  DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -179,16 +179,16 @@ model Prescription {
 }
 
 model LabReport {
-  id          Int             @id @default(autoincrement())
-  patientId   Int
+  id          String          @id @default(auto()) @map("_id") @db.ObjectId
+  patientId   String          @db.ObjectId
   testName    String
   testType    String
   status      LabReportStatus @default(PENDING)
-  results     String?         @db.Text // JSON string or text results
-  fileUrl     String?         // AWS S3 file URL
-  fileName    String?         // Original file name
-  remarks     String?         @db.Text
-  conductedBy Int?
+  results     String? // JSON string or text results
+  fileUrl     String? // AWS S3 file URL
+  fileName    String? // Original file name
+  remarks     String?
+  conductedBy String?         @db.ObjectId
   reportDate  DateTime?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -200,10 +200,10 @@ model LabReport {
 }
 
 model MedicalRecord {
-  id          Int      @id @default(autoincrement())
-  patientId   Int
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  patientId   String   @db.ObjectId
   recordType  String // e.g., "Allergy", "Surgery", "Chronic Condition"
-  description String   @db.Text
+  description String
   recordDate  DateTime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -214,15 +214,15 @@ model MedicalRecord {
 }
 
 model Billing {
-  id            Int           @id @default(autoincrement())
-  patientId     Int
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  patientId     String        @db.ObjectId
   invoiceNumber String        @unique
-  services      String        @db.Text // JSON string of services/tests
+  services      String // JSON string of services/tests
   totalAmount   Float
   paidAmount    Float         @default(0)
   status        BillingStatus @default(PENDING)
   paymentMethod String?
-  notes         String?       @db.Text
+  notes         String?
   billingDate   DateTime      @default(now())
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
@@ -233,13 +233,13 @@ model Billing {
 }
 
 model Treatment {
-  id          Int      @id @default(autoincrement())
-  patientId   Int
-  doctorId    Int
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  patientId   String   @db.ObjectId
+  doctorId    String   @db.ObjectId
   diagnosis   String
-  treatment   String   @db.Text
-  medications String?  @db.Text // JSON string of medications
-  notes       String?  @db.Text
+  treatment   String
+  medications String? // JSON string of medications
+  notes       String?
   followUpDate DateTime?
   treatmentDate DateTime @default(now())
   createdAt   DateTime @default(now())

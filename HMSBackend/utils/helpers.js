@@ -24,8 +24,16 @@ const generateToken = (userId, role) => {
 
 // Format user response (remove sensitive data)
 const formatUserResponse = (user) => {
-  const { password, ...userWithoutPassword } = user;
-  return userWithoutPassword;
+  // Convert Mongoose document to plain object
+  const userObj = user.toObject ? user.toObject() : user;
+  
+  // Remove password field
+  const { password, __v, _id, ...userWithoutPassword } = userObj;
+  
+  return {
+    id: _id || userObj.id,
+    ...userWithoutPassword
+  };
 };
 
 // Pagination helper

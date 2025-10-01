@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
-const { PrismaClient } = require('@prisma/client');
+const { connectDB, disconnectDB } = require('./config/database');
 const config = require('./config/config');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
@@ -17,7 +17,6 @@ const doctorRoutes = require('./routes/doctorRoutes');
 
 // Initialize Express app
 const app = express();
-const prisma = new PrismaClient();
 
 // Middleware
 app.use(cors({
@@ -54,22 +53,10 @@ app.use(notFound);
 // Error handler
 app.use(errorHandler);
 
-// Database connection test
-const testDatabaseConnection = async () => {
-  try {
-    await prisma.$connect();
-    console.log('✅ Database connected successfully');
-  } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
-    process.exit(1);
-  }
-};
-
 // Graceful shutdown
 const gracefulShutdown = async () => {
   console.log('\n🔄 Shutting down gracefully...');
-  await prisma.$disconnect();
-  console.log('✅ Database disconnected');
+  await disconnectDB();
   process.exit(0);
 };
 
@@ -79,7 +66,7 @@ process.on('SIGTERM', gracefulShutdown);
 // Start server
 const startServer = async () => {
   try {
-    await testDatabaseConnection();
+    await connectDB();
     
     const PORT = config.port;
     app.listen(PORT, () => {

@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const { Prescription, Doctor, Appointment, Patient } = require('../models');
 const { getPagination, formatPaginationResponse } = require('../utils/helpers');
-
-const prisma = new PrismaClient();
 
 // Create prescription (Doctor only)
 const createPrescription = async (req, res, next) => {
@@ -16,9 +14,7 @@ const createPrescription = async (req, res, next) => {
     } = req.body;
 
     // Get doctor profile
-    const doctor = await prisma.doctor.findUnique({
-      where: { userId: req.user.id }
-    });
+    const doctor = await Doctor.findOne({ userId: req.user.id });
 
     if (!doctor) {
       return res.status(403).json({
@@ -28,9 +24,7 @@ const createPrescription = async (req, res, next) => {
     }
 
     // Verify appointment exists and belongs to this doctor
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: parseInt(appointmentId) }
-    });
+    const appointment = await Appointment.findById(appointmentId);
 
     if (!appointment) {
       return res.status(404).json({
@@ -39,7 +33,7 @@ const createPrescription = async (req, res, next) => {
       });
     }
 
-    if (appointment.doctorId !== doctor.id) {
+    if (appointment.doctorId.toString() !== doctor._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'You can only create prescriptions for your own appointments'
@@ -47,9 +41,7 @@ const createPrescription = async (req, res, next) => {
     }
 
     // Check if prescription already exists for this appointment
-    const existingPrescription = await prisma.prescription.findUnique({
-      where: { appointmentId: parseInt(appointmentId) }
-    });
+    const existingPrescription = await Prescription.findOne({ appointmentId });
 
     if (existingPrescription) {
       return res.status(400).json({
@@ -58,38 +50,24 @@ const createPrescription = async (req, res, next) => {
       });
     }
 
-    const prescription = await prisma.prescription.create({
-      data: {
-        appointmentId: parseInt(appointmentId),
-        patientId: parseInt(patientId),
-        doctorId: doctor.id,
-        diagnosis,
-        medicines: JSON.stringify(medicines),
-        instructions,
-        followUpDate: followUpDate ? new Date(followUpDate) : null
-      },
-      include: {
-        appointment: true,
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                email: true
-              }
-            }
-          }
-        }
-      }
+    const prescription = await Prescription.create({
+      appointmentId,
+      patientId,
+      doctorId: doctor._id,
+      diagnosis,
+      medicines: JSON.stringify(medicines),
+      instructions,
+      followUpDate: followUpDate ? new Date(followUpDate) : null
     });
 
+    await prescription.populate([
+      { path: 'appointmentId' },
+      { path: 'patientId' },
+      { path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName email' } }
+    ]);
+
     // Update appointment status to completed
-    await prisma.appointment.update({
-      where: { id: parseInt(appointmentId) },
-      data: { status: 'COMPLETED' }
-    });
+    await Appointment.findByIdAndUpdate(appointmentId, { status: 'COMPLETED' });
 
     // Parse medicines back to JSON for response
     const prescriptionData = {
@@ -124,28 +102,14 @@ const getAllPrescriptions = async (req, res, next) => {
     }
 
     const [prescriptions, total] = await Promise.all([
-      prisma.prescription.findMany({
-        where,
-        skip,
-        take,
-        include: {
-          patient: true,
-          doctor: {
-            include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  email: true
-                }
-              }
-            }
-          },
-          appointment: true
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.prescription.count({ where })
+      Prescription.find(where)
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName email' } })
+        .populate('appointmentId')
+        .sort({ createdAt: -1 }),
+      Prescription.countDocuments(where)
     ]);
 
     // Parse medicines JSON
@@ -168,25 +132,10 @@ const getPrescriptionById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const prescription = await prisma.prescription.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                email: true,
-                phone: true
-              }
-            }
-          }
-        },
-        appointment: true
-      }
-    });
+    const prescription = await Prescription.findById(id)
+      .populate('patientId')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName email phone' } })
+      .populate('appointmentId');
 
     if (!prescription) {
       return res.status(404).json({
@@ -217,9 +166,7 @@ const updatePrescription = async (req, res, next) => {
     const { diagnosis, medicines, instructions, followUpDate } = req.body;
 
     // Get doctor profile
-    const doctor = await prisma.doctor.findUnique({
-      where: { userId: req.user.id }
-    });
+    const doctor = await Doctor.findOne({ userId: req.user.id });
 
     if (!doctor) {
       return res.status(403).json({
@@ -229,9 +176,7 @@ const updatePrescription = async (req, res, next) => {
     }
 
     // Verify prescription belongs to this doctor
-    const existingPrescription = await prisma.prescription.findUnique({
-      where: { id: parseInt(id) }
-    });
+    const existingPrescription = await Prescription.findById(id);
 
     if (!existingPrescription) {
       return res.status(404).json({
@@ -240,35 +185,26 @@ const updatePrescription = async (req, res, next) => {
       });
     }
 
-    if (existingPrescription.doctorId !== doctor.id) {
+    if (existingPrescription.doctorId.toString() !== doctor._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'You can only update your own prescriptions'
       });
     }
 
-    const prescription = await prisma.prescription.update({
-      where: { id: parseInt(id) },
-      data: {
-        diagnosis,
-        medicines: medicines ? JSON.stringify(medicines) : undefined,
-        instructions,
-        followUpDate: followUpDate ? new Date(followUpDate) : undefined
-      },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const updateData = {};
+    if (diagnosis) updateData.diagnosis = diagnosis;
+    if (medicines) updateData.medicines = JSON.stringify(medicines);
+    if (instructions) updateData.instructions = instructions;
+    if (followUpDate) updateData.followUpDate = new Date(followUpDate);
+
+    const prescription = await Prescription.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true }
+    )
+      .populate('patientId')
+      .populate({ path: 'doctorId', populate: { path: 'userId', select: 'firstName lastName' } });
 
     // Parse medicines back to JSON
     const prescriptionData = {
@@ -293,9 +229,7 @@ const getDoctorPrescriptions = async (req, res, next) => {
     const { skip, take } = getPagination(page, limit);
 
     // Get doctor profile
-    const doctor = await prisma.doctor.findUnique({
-      where: { userId: req.user.id }
-    });
+    const doctor = await Doctor.findOne({ userId: req.user.id });
 
     if (!doctor) {
       return res.status(403).json({
@@ -305,17 +239,13 @@ const getDoctorPrescriptions = async (req, res, next) => {
     }
 
     const [prescriptions, total] = await Promise.all([
-      prisma.prescription.findMany({
-        where: { doctorId: doctor.id },
-        skip,
-        take,
-        include: {
-          patient: true,
-          appointment: true
-        },
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.prescription.count({ where: { doctorId: doctor.id } })
+      Prescription.find({ doctorId: doctor._id })
+        .skip(skip)
+        .limit(take)
+        .populate('patientId')
+        .populate('appointmentId')
+        .sort({ createdAt: -1 }),
+      Prescription.countDocuments({ doctorId: doctor._id })
     ]);
 
     // Parse medicines JSON

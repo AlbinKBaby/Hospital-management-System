@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { useSelector } from 'react-redux';
 
 // Auth Pages
+import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
@@ -35,10 +36,6 @@ import LabReportsList from './pages/lab/LabReportsList';
 import UserManagement from './pages/admin/UserManagement';
 import ReportsPage from './pages/admin/ReportsPage';
 
-// Other Pages
-import Unauthorized from './pages/Unauthorized';
-import NotFound from './pages/NotFound';
-
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -46,19 +43,19 @@ function App() {
   const { isAuthenticated, user } = useSelector((state) => state.auth);
 
   const getDefaultRoute = () => {
-    if (!isAuthenticated) return '/login';
+    if (!isAuthenticated) return '/home';
     
-    switch (user?.role) {
-      case 'doctor':
+    switch (user?.role?.toUpperCase()) {
+      case 'DOCTOR':
         return '/doctor/dashboard';
-      case 'receptionist':
+      case 'RECEPTIONIST':
         return '/receptionist/dashboard';
-      case 'lab_staff':
+      case 'LAB_STAFF':
         return '/lab/dashboard';
-      case 'admin':
+      case 'ADMIN':
         return '/admin/dashboard';
       default:
-        return '/login';
+        return '/home';
     }
   };
 
@@ -66,9 +63,9 @@ function App() {
     <Router>
       <Routes>
         {/* Public Routes */}
+        <Route path="/home" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/unauthorized" element={<Unauthorized />} />
 
         {/* Default Route */}
         <Route path="/" element={<Navigate to={getDefaultRoute()} replace />} />
@@ -249,8 +246,8 @@ function App() {
           }
         />
 
-        {/* 404 Route */}
-        <Route path="*" element={<NotFound />} />
+        {/* Catch all - redirect to home */}
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </Router>
   );

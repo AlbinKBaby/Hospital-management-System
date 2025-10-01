@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
+const { User, Doctor, Receptionist, LabStaff } = require('../models');
 const { hashPassword, comparePassword, generateToken, formatUserResponse } = require('../utils/helpers');
-
-const prisma = new PrismaClient();
 
 // Register new user (Admin only can create users)
 const register = async (req, res, next) => {
@@ -9,9 +7,7 @@ const register = async (req, res, next) => {
     const { email, password, role, firstName, lastName, phone, ...roleSpecificData } = req.body;
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email }
-    });
+    const existingUser = await User.findOne({ email });
 
     if (existingUser) {
       return res.status(400).json({
@@ -33,38 +29,32 @@ const register = async (req, res, next) => {
       phone
     };
 
-    // Add role-specific relations
+    // Create user
+    const user = await User.create(userData);
+
+    // Create role-specific data
     if (role === 'DOCTOR') {
-      userData.doctor = {
-        create: {
-          specialization: roleSpecificData.specialization,
-          qualification: roleSpecificData.qualification,
-          experience: roleSpecificData.experience || 0,
-          consultationFee: roleSpecificData.consultationFee || 0
-        }
-      };
+      await Doctor.create({
+        userId: user._id,
+        specialization: roleSpecificData.specialization,
+        qualification: roleSpecificData.qualification,
+        experience: roleSpecificData.experience || 0,
+        consultationFee: roleSpecificData.consultationFee || 0
+      });
     } else if (role === 'RECEPTIONIST') {
-      userData.receptionist = {
-        create: {
-          shift: roleSpecificData.shift || null
-        }
-      };
+      await Receptionist.create({
+        userId: user._id,
+        shift: roleSpecificData.shift || null
+      });
     } else if (role === 'LAB_STAFF') {
-      userData.labStaff = {
-        create: {
-          department: roleSpecificData.department || null
-        }
-      };
+      await LabStaff.create({
+        userId: user._id,
+        department: roleSpecificData.department || null
+      });
     }
 
-    const user = await prisma.user.create({
-      data: userData,
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    // Populate role-specific data
+    await user.populate(['doctor', 'receptionist', 'labStaff']);
 
     const token = generateToken(user.id, user.role);
 
@@ -87,14 +77,10 @@ const login = async (req, res, next) => {
     const { email, password } = req.body;
 
     // Find user
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const user = await User.findOne({ email })
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     if (!user) {
       return res.status(401).json({
@@ -140,14 +126,10 @@ const login = async (req, res, next) => {
 // Get current user profile
 const getProfile = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const user = await User.findById(req.user.id)
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     res.status(200).json({
       success: true,
@@ -163,19 +145,14 @@ const updateProfile = async (req, res, next) => {
   try {
     const { firstName, lastName, phone } = req.body;
 
-    const user = await prisma.user.update({
-      where: { id: req.user.id },
-      data: {
-        firstName,
-        lastName,
-        phone
-      },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { firstName, lastName, phone },
+      { new: true }
+    )
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     res.status(200).json({
       success: true,
@@ -192,9 +169,7 @@ const changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id }
-    });
+    const user = await User.findById(req.user.id);
 
     // Verify current password
     const isPasswordValid = await comparePassword(currentPassword, user.password);
@@ -209,10 +184,7 @@ const changePassword = async (req, res, next) => {
     // Hash new password
     const hashedPassword = await hashPassword(newPassword);
 
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: { password: hashedPassword }
-    });
+    await User.findByIdAndUpdate(req.user.id, { password: hashedPassword });
 
     res.status(200).json({
       success: true,
@@ -240,14 +212,10 @@ const logout = async (req, res, next) => {
 // Get current user (alias for getProfile - /auth/me endpoint)
 const getCurrentUser = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      include: {
-        doctor: true,
-        receptionist: true,
-        labStaff: true
-      }
-    });
+    const user = await User.findById(req.user.id)
+      .populate('doctor')
+      .populate('receptionist')
+      .populate('labStaff');
 
     res.status(200).json({
       success: true,
